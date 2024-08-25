@@ -11,7 +11,11 @@ tokio = { version = "1.39.3", features = [
     "macros",
     "rt-multi-thread"
 ], optional = true }
-polars = { version = "0.42.0", features = ["lazy", "csv", "fmt", "pct_change"] }
+ndarray = "0.16.1"
+polars = { version = "0.42.0", optional=true,features = ["lazy", "csv", "fmt", "pct_change","ndarray"] }
+linfa = "0.7.0"
+linfa-linear = "0.7.0"
 
 [features]
 download = ["futures", "yahoo_finance_api", "time", "tokio"]
+use-polars = ["polars"]
