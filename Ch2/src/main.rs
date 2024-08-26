@@ -5,26 +5,20 @@ use ndarray::prelude::*;
 use std::error::Error;
 use std::fs::File;
 #[cfg(feature = "download")]
-use yahoo_finance_api::{Quote, YahooConnector};
-#[cfg(feature = "download")]
-async fn download(name: &str) -> Vec<Quote> {
+// 未经过测试，需要一定的网络条件，不建议使用
+fn download(name: &str) -> Vec<f64> {
     use time::macros::datetime;
+    use yahoo_finance_api::YahooConnector;
     let provider = YahooConnector::new().unwrap();
     let start = datetime!(2020-1-1 0:00:00.00 UTC);
     let end = datetime!(2020-12-31 23:59:59.99 UTC);
     // including timestamp,open,close,high,low,volume
-
-    provider
+    let vec_quote = provider
         .get_quote_history(name, start, end)
-        .await
         .unwrap()
         .quotes()
-        .unwrap()
-}
-#[cfg(feature = "download")]
-#[tokio::main]
-async fn main() {
-    let _vec = download("AAPL").await;
+        .unwrap();
+    vec_quote.into_iter().map(|x| x.adjclose).collect()
 }
 
 #[cfg(feature = "use-polars")]
@@ -52,7 +46,6 @@ fn _polars_train() -> Result<(), Box<dyn Error>> {
     let x_lf = x_lf.to_ndarray::<Float64Type>(IndexOrder::C)?;
     let y_lf = y_lf.to_ndarray()?.to_owned();
     train(x_lf, y_lf)?;
-    // 以下内容无法拆成一个新函数，是不同版本的 ndarray 库导致
     Ok(())
 }
 fn train(x_lf: Array2<f64>, y_lf: Array1<f64>) -> Result<(), Box<dyn Error>> {
@@ -73,10 +66,9 @@ fn read_from_csv(filename: &str) -> Result<Vec<f64>, Box<dyn Error>> {
     let data = get_data(&mut reader, index);
     Ok(data)
 }
-fn training() -> Result<(), Box<dyn Error>> {
-    let records = read_from_csv("./^GSPC.csv")?;
+// 参考：https://www.freecodecamp.org/news/how-to-build-a-machine-learning-model-in-rust/
+fn training(records: Vec<f64>, target: Vec<f64>) -> Result<(), Box<dyn Error>> {
     let x_lf = get_records(&records);
-    let target = read_from_csv("./AAPL.csv")?;
     let y_lf = get_targets(target);
     train(x_lf, y_lf)?;
     Ok(())
@@ -114,9 +106,19 @@ fn get_targets(data: Vec<f64>) -> Array1<f64> {
     Array::from(target)
 }
 
-#[cfg(not(feature = "download"))]
 fn main() {
     #[cfg(feature = "use-polars")]
     _polars_train().unwrap();
-    training().unwrap();
+    #[cfg(not(feature = "use-polars"))]
+    {
+        #[cfg(feature = "download")]
+        let records = download("^GSPC.csv");
+        #[cfg(feature = "download")]
+        let target = download("AAPL.csv");
+        #[cfg(not(feature = "download"))]
+        let records = read_from_csv("./^GSPC.csv").unwrap();
+        #[cfg(not(feature = "download"))]
+        let target = read_from_csv("./AAPL.csv").unwrap();
+        training(records, target).unwrap();
+    }
 }

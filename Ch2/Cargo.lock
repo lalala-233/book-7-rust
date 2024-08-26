@@ -13,7 +13,6 @@ dependencies = [
  "ndarray",
  "polars",
  "time",
- "tokio",
  "yahoo_finance_api",
 ]
 
@@ -1931,6 +1930,7 @@ checksum = "f8f4955649ef5c38cc7f9e8aa41761d48fb9677197daea9984dc54f56aad5e63"
 dependencies = [
  "base64",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -2416,19 +2416,7 @@ dependencies = [
  "mio",
  "pin-project-lite",
  "socket2",
- "tokio-macros",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "tokio-macros"
-version = "2.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "693d596312e88961bc67d7f1f97af8a70227d9f90c31bba5806eec004978d752"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.76",
 ]
 
 [[package]]
