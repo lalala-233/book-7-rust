@@ -26,7 +26,8 @@ pub fn draw(
 
     // 获取模型参数
     let slope = model.params()[0];
-    let intercept = model.params()[1] + model.intercept(); //截矩
+    let intercept = model.intercept(); //截矩
+    println!("slope: {}, intercept: {}", slope, intercept);
     let way2 = [-0.12, 0.1].map(|x| (x, slope * x + intercept));
     chart.draw_series(LineSeries::new(
         way2,

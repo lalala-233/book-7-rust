@@ -13,8 +13,6 @@ fn main() {
         let (x_lf, y_lf) = polars_read_from_csv().unwrap();
         dataset = Dataset::new(x_lf, y_lf);
         model = train(&dataset).unwrap();
-        let r2 = model.predict(&dataset).r2(&dataset).unwrap();
-        println!("r2: {}", r2);
     }
     #[cfg(not(feature = "use-polars"))]
     {
@@ -67,7 +65,7 @@ fn polars_read_from_csv() -> Result<(Array2<f64>, Array1<f64>), Box<dyn Error>> 
     let y_lf = y_lf.column("Adj Close").unwrap().f64().unwrap().to_owned(); // 获得 ChunkedArray 类型数据，可以转化为一维向量
 
     let x_lf = LazyCsvReader::new("^GSPC.csv").finish()?;
-    let x_lf = x_lf.select(&[col("Adj Close").pct_change(lit(1)), lit(1)]);
+    let x_lf = x_lf.select(&[col("Adj Close").pct_change(lit(1))]);
     let x_lf = x_lf.drop_nulls(None).collect()?;
 
     let x_lf = x_lf.to_ndarray::<Float64Type>(IndexOrder::C)?;
@@ -104,19 +102,13 @@ fn get_data(reader: &mut Reader<File>, index: usize) -> Vec<f64> {
 fn get_records(data: &[f64]) -> Array2<f64> {
     let length = data.len() - 1; // 最后一项数据没有 pct_change
     let iter = pct_change(data);
-    let records: Vec<_> = add_constant(iter).collect();
-    Array::from(records)
-        .into_shape((length, 2)) // ndarray 0.16.1 中改为 into_shape_with_order
-        .unwrap()
+    Array::from_iter(iter).into_shape((length, 1)).unwrap()
 }
 fn get_targets(data: &[f64]) -> Array1<f64> {
-    let target: Vec<_> = pct_change(data).collect();
-    Array::from(target)
+    let iter = pct_change(data);
+    Array::from_iter(iter)
 }
 fn pct_change(data: &[f64]) -> impl Iterator<Item = f64> + '_ {
     data.windows(2)
         .map(|window| (window[1] - window[0]) / window[0])
-}
-fn add_constant(iter: impl Iterator<Item = f64>) -> impl Iterator<Item = f64> {
-    iter.flat_map(|f| [f, 1.].into_iter())
 }
