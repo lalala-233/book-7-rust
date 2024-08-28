@@ -4,6 +4,39 @@ use linfa_linear::{FittedLinearRegression, LinearRegression};
 use ndarray::prelude::*;
 use std::error::Error;
 use std::fs::File;
+mod plot;
+fn main() {
+    let model: FittedLinearRegression<f64>;
+    let dataset: Dataset<f64, f64, Ix1>;
+    #[cfg(feature = "use-polars")]
+    {
+        let (x_lf, y_lf) = polars_read_from_csv().unwrap();
+        dataset = Dataset::new(x_lf, y_lf);
+        model = train(&dataset).unwrap();
+        let r2 = model.predict(&dataset).r2(&dataset).unwrap();
+        println!("r2: {}", r2);
+    }
+    #[cfg(not(feature = "use-polars"))]
+    {
+        #[cfg(feature = "download")]
+        let records = download("^GSPC.csv");
+        #[cfg(feature = "download")]
+        let target = download("AAPL.csv");
+        #[cfg(not(feature = "download"))]
+        let records = read_from_csv("./^GSPC.csv").unwrap();
+        #[cfg(not(feature = "download"))]
+        let target = read_from_csv("./AAPL.csv").unwrap();
+
+        let x_lf = get_records(&records);
+        let y_lf = get_targets(&target);
+        dataset = Dataset::new(x_lf.clone(), y_lf.clone());
+
+        model = train(&dataset).unwrap();
+        plot::draw(&dataset, &model).unwrap();
+    }
+    let r2 = model.predict(&dataset).r2(&dataset).unwrap();
+    println!("r2: {}", r2);
+}
 #[cfg(feature = "download")]
 // 未经过测试，需要一定的网络条件，不建议使用
 fn download(name: &str) -> Vec<f64> {
@@ -20,13 +53,12 @@ fn download(name: &str) -> Vec<f64> {
         .unwrap();
     vec_quote.into_iter().map(|x| x.adjclose).collect()
 }
-
 #[cfg(feature = "use-polars")]
 use polars::prelude::*;
 #[cfg(feature = "use-polars")]
 // polars 只用于 csv 读取，编绎较慢，不建议启用
 // 参考：https://www.51cto.com/article/782545.html
-fn _polars_read_from_csv() -> Result<(DataFrame, ChunkedArray<Float64Type>), Box<dyn Error>> {
+fn polars_read_from_csv() -> Result<(Array2<f64>, Array1<f64>), Box<dyn Error>> {
     //"Ch2/src/main.rs"
 
     let y_lf = LazyCsvReader::new("AAPL.csv").finish()?;
@@ -38,25 +70,13 @@ fn _polars_read_from_csv() -> Result<(DataFrame, ChunkedArray<Float64Type>), Box
     let x_lf = x_lf.select(&[col("Adj Close").pct_change(lit(1)), lit(1)]);
     let x_lf = x_lf.drop_nulls(None).collect()?;
 
-    Ok((x_lf, y_lf))
-}
-#[cfg(feature = "use-polars")]
-fn _polars_train() -> Result<(), Box<dyn Error>> {
-    let (x_lf, y_lf) = _polars_read_from_csv().unwrap();
     let x_lf = x_lf.to_ndarray::<Float64Type>(IndexOrder::C)?;
     let y_lf = y_lf.to_ndarray()?.to_owned();
-    train(x_lf, y_lf)?;
-    Ok(())
+    Ok((x_lf, y_lf))
 }
-fn train(x_lf: Array2<f64>, y_lf: Array1<f64>) -> Result<(), Box<dyn Error>> {
-    let dataset = Dataset::new(x_lf, y_lf);
-    let (training, validation) = dataset.split_with_ratio(0.8);
+fn train(dataset: &Dataset<f64, f64, Ix1>) -> Result<FittedLinearRegression<f64>, Box<dyn Error>> {
     let model = LinearRegression::new();
-    let model: FittedLinearRegression<_> = model.fit(&training)?;
-    let pred = model.predict(&validation);
-    let r2 = pred.r2(&validation)?;
-    println!("r2 from prediction: {}", r2);
-    Ok(())
+    Ok(model.fit(dataset)?)
 }
 fn read_from_csv(filename: &str) -> Result<Vec<f64>, Box<dyn Error>> {
     let mut reader = Reader::from_path(filename)?;
@@ -67,19 +87,13 @@ fn read_from_csv(filename: &str) -> Result<Vec<f64>, Box<dyn Error>> {
     Ok(data)
 }
 // 参考：https://www.freecodecamp.org/news/how-to-build-a-machine-learning-model-in-rust/
-fn training(records: Vec<f64>, target: Vec<f64>) -> Result<(), Box<dyn Error>> {
-    let x_lf = get_records(&records);
-    let y_lf = get_targets(target);
-    train(x_lf, y_lf)?;
-    Ok(())
-}
 fn get_headers(reader: &mut Reader<File>) -> Vec<String> {
-    return reader
+    reader
         .headers()
         .unwrap()
         .iter()
         .map(|str| str.to_owned())
-        .collect();
+        .collect()
 }
 fn get_data(reader: &mut Reader<File>, index: usize) -> Vec<f64> {
     let records = reader.records();
@@ -89,36 +103,20 @@ fn get_data(reader: &mut Reader<File>, index: usize) -> Vec<f64> {
 }
 fn get_records(data: &[f64]) -> Array2<f64> {
     let length = data.len() - 1; // 最后一项数据没有 pct_change
-    let iter = data
-        .windows(2)
-        .map(|window| (window[1] - window[0]) / window[0]); // pct_chatge
-    let records: Vec<_> = iter.flat_map(|f| [f, 1.].into_iter()).collect();
+    let iter = pct_change(data);
+    let records: Vec<_> = add_constant(iter).collect();
     Array::from(records)
-        .into_shape((length, 2)) // ndarray 中改为 into_shape_with_order
+        .into_shape((length, 2)) // ndarray 0.16.1 中改为 into_shape_with_order
         .unwrap()
-    // Array::from(records).to_shape((303, 13)).unwrap()
 }
-fn get_targets(data: Vec<f64>) -> Array1<f64> {
-    let target: Vec<_> = data
-        .windows(2)
-        .map(|window| (window[1] - window[0]) / window[0])
-        .collect();
+fn get_targets(data: &[f64]) -> Array1<f64> {
+    let target: Vec<_> = pct_change(data).collect();
     Array::from(target)
 }
-
-fn main() {
-    #[cfg(feature = "use-polars")]
-    _polars_train().unwrap();
-    #[cfg(not(feature = "use-polars"))]
-    {
-        #[cfg(feature = "download")]
-        let records = download("^GSPC.csv");
-        #[cfg(feature = "download")]
-        let target = download("AAPL.csv");
-        #[cfg(not(feature = "download"))]
-        let records = read_from_csv("./^GSPC.csv").unwrap();
-        #[cfg(not(feature = "download"))]
-        let target = read_from_csv("./AAPL.csv").unwrap();
-        training(records, target).unwrap();
-    }
+fn pct_change(data: &[f64]) -> impl Iterator<Item = f64> + '_ {
+    data.windows(2)
+        .map(|window| (window[1] - window[0]) / window[0])
+}
+fn add_constant(iter: impl Iterator<Item = f64>) -> impl Iterator<Item = f64> {
+    iter.flat_map(|f| [f, 1.].into_iter())
 }
